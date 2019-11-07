@@ -4634,6 +4634,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         destdir = os.path.dirname(dest)
         if not os.path.exists(destdir):
             os.mkdir(destdir)
+        self.progress("Copying (%s) to (%s)" % (source, dest))
         shutil.copy(source, dest)
 
     def remove_example_script(self, scriptname):
@@ -4646,6 +4647,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
             pass
 
     def test_scripting_simple_loop(self):
+        self.start_subtest("Scripting simple loop")
         ex = None
         example_script = "simple_loop.lua"
         messages = []
@@ -4658,6 +4660,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
             self.set_parameter("SCR_ENABLE", 1)
             self.install_example_script(example_script)
             self.reboot_sitl()
+            self.delay_sim_time(10)
         except Exception as e:
             ex = e
         self.remove_example_script(example_script)
@@ -4677,7 +4680,43 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         if count < 3:
             raise NotAchievedException("Expected at least three hellos")
 
+    def test_scripting_internal_test(self):
+        self.start_subtest("Scripting internal test")
+        ex = None
+        example_script = "scripting_test.lua"
+        messages = []
+        def my_message_hook(mav, m):
+            if m.get_type() != 'STATUSTEXT':
+                return
+            messages.append(m)
+        self.install_message_hook(my_message_hook)
+        try:
+            self.set_parameter("SCR_ENABLE", 1)
+            self.set_parameter("SCR_HEAP_SIZE", 65536) # this is more heap then we need, but this script will keep getting bigger
+            self.install_example_script(example_script)
+            self.reboot_sitl()
+            self.delay_sim_time(10)
+        except Exception as e:
+            ex = e
+        self.remove_example_script(example_script)
+        self.reboot_sitl()
+
+        self.remove_message_hook(my_message_hook)
+
+        if ex is not None:
+            raise ex
+
+        # check all messages to see if we got our message
+        success = False
+        for m in messages:
+            if "Internal tests passed" in m.text:
+                success = True
+        self.progress("Success")
+        if not success :
+            raise NotAchievedException("Scripting internal test failed")
+
     def test_scripting_hello_world(self):
+        self.start_subtest("Scripting hello world")
         ex = None
         example_script = "hello_world.lua"
         messages = []
@@ -4753,7 +4792,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
 
             ("GetCapabilities",
              "Get Capabilities",
-             self.do_get_autopilot_capabilities),
+             self.test_get_autopilot_capabilities),
 
             ("DO_SET_MODE",
              "Set mode via MAV_COMMAND_DO_SET_MODE",

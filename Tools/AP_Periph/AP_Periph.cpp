@@ -51,17 +51,7 @@ static uint32_t start_ms;
 /*
   declare constant app_descriptor in flash
  */
-const struct app_descriptor app_descriptor __attribute__((section(".app_descriptor"))) = {
-    .sig = { 0x40, 0xa2, 0xe4, 0xf1, 0x64, 0x68, 0x91, 0x06 },
-    .image_crc1 = 0,
-    .image_crc2 = 0,
-    .image_size = 0,
-    .git_hash = 0,
-    .version_major = AP::fwversion().major,
-    .version_minor = AP::fwversion().minor,
-    .board_id = APJ_BOARD_ID,
-    .reserved = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }
-};
+const struct app_descriptor app_descriptor __attribute__((section(".app_descriptor")));
 
 void AP_Periph_FW::init()
 {
@@ -130,6 +120,9 @@ void AP_Periph_FW::init()
 #endif
 
 #ifdef HAL_PERIPH_ENABLE_RANGEFINDER
+    const uint8_t sernum = 3; // uartB
+    hal.uartB->begin(g.rangefinder_baud);
+    serial_manager.set_protocol_and_baud(sernum, AP_SerialManager::SerialProtocol_Rangefinder, g.rangefinder_baud);
     rangefinder.init(ROTATION_NONE);
 #endif
     
@@ -207,6 +200,9 @@ void AP_Periph_FW::update()
 #endif
 #ifdef HAL_PERIPH_ENABLE_BARO
         hal.uartA->printf("BARO H=%u P=%.2f T=%.2f\n", baro.healthy(), baro.get_pressure(), baro.get_temperature());
+#endif
+#ifdef HAL_PERIPH_ENABLE_RANGEFINDER
+        hal.uartA->printf("RNG %u %ucm\n", rangefinder.num_sensors(), rangefinder.distance_cm_orient(ROTATION_NONE));
 #endif
         hal.scheduler->delay(1);
         show_stack_usage();
