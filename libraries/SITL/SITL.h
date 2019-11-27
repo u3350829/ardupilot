@@ -1,5 +1,9 @@
 #pragma once
 
+#include <AP_HAL/AP_HAL.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+
 #include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_Common/Location.h>
@@ -11,6 +15,7 @@
 #include "SIM_Precland.h"
 #include "SIM_Sprayer.h"
 #include "SIM_ToneAlarm.h"
+#include "SIM_EFI_MegaSquirt.h"
 
 namespace SITL {
 
@@ -180,6 +185,14 @@ public:
     AP_Int8 gps_hdg_enabled; // enable the output of a NMEA heading HDT sentence
     AP_Int32 loop_delay; // extra delay to add to every loop
 
+    // EFI type
+    enum EFIType {
+        EFI_TYPE_NONE = 0,
+        EFI_TYPE_MS = 1,
+    };
+    
+    AP_Int8  efi_type;
+
     // wind control
     enum WindType {
         WIND_TYPE_SQRT = 0,
@@ -279,6 +292,19 @@ public:
         AP_Float hdg; // 0 to 360
     } opos;
 
+    AP_Int8 _safety_switch_state;
+
+    AP_HAL::Util::safety_state safety_switch_state() const {
+        return (AP_HAL::Util::safety_state)_safety_switch_state.get();
+    }
+    void force_safety_off() {
+        _safety_switch_state = (uint8_t)AP_HAL::Util::SAFETY_ARMED;
+    }
+    bool force_safety_on() {
+        _safety_switch_state = (uint8_t)AP_HAL::Util::SAFETY_DISARMED;
+        return true;
+    }
+
     uint16_t irlock_port;
 
     void simstate_send(mavlink_channel_t chan);
@@ -311,6 +337,8 @@ public:
         uint8_t num_leds[16];
         uint32_t send_counter;
     } led;
+
+    EFI_MegaSquirt efi_ms;
 };
 
 } // namespace SITL
@@ -319,3 +347,5 @@ public:
 namespace AP {
     SITL::SITL *sitl();
 };
+
+#endif // CONFIG_HAL_BOARD

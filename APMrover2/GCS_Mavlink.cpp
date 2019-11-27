@@ -2,7 +2,7 @@
 
 #include "GCS_Mavlink.h"
 
-#include <AP_RangeFinder/RangeFinder_Backend.h>
+#include <AP_RangeFinder/AP_RangeFinder_Backend.h>
 
 MAV_TYPE GCS_Rover::frame_type() const
 {
@@ -58,7 +58,7 @@ uint32_t GCS_Rover::custom_mode() const
     return rover.control_mode->mode_number();
 }
 
-MAV_STATE GCS_MAVLINK_Rover::system_status() const
+MAV_STATE GCS_MAVLINK_Rover::vehicle_system_status() const
 {
     if ((rover.failsafe.triggered != 0) || rover.failsafe.ekf) {
         return MAV_STATE_CRITICAL;
@@ -586,11 +586,11 @@ MAV_RESULT GCS_MAVLINK_Rover::_handle_command_preflight_calibration(const mavlin
     return GCS_MAVLINK::_handle_command_preflight_calibration(packet);
 }
 
-bool GCS_MAVLINK_Rover::set_home_to_current_location(bool lock) {
-    return rover.set_home_to_current_location(lock);
+bool GCS_MAVLINK_Rover::set_home_to_current_location(bool _lock) {
+    return rover.set_home_to_current_location(_lock);
 }
-bool GCS_MAVLINK_Rover::set_home(const Location& loc, bool lock) {
-    return rover.set_home(loc, lock);
+bool GCS_MAVLINK_Rover::set_home(const Location& loc, bool _lock) {
+    return rover.set_home(loc, _lock);
 }
 
 MAV_RESULT GCS_MAVLINK_Rover::handle_command_int_packet(const mavlink_command_int_t &packet)
@@ -648,16 +648,21 @@ MAV_RESULT GCS_MAVLINK_Rover::handle_command_long_packet(const mavlink_command_l
     {
         // param1 : yaw angle to adjust direction by in centidegress
         // param2 : Speed - normalized to 0 .. 1
+        // param3 : 0 = absolute, 1 = relative
 
         // exit if vehicle is not in Guided mode
         if (!rover.control_mode->in_guided_mode()) {
             return MAV_RESULT_FAILED;
         }
 
-        // send yaw change and target speed to guided mode controller
-        const float speed_max = rover.control_mode->get_speed_default();
-        const float target_speed = constrain_float(packet.param2 * speed_max, -speed_max, speed_max);
-        rover.mode_guided.set_desired_heading_delta_and_speed(packet.param1, target_speed);
+        // get final angle, 1 = Relative, 0 = Absolute
+        if (packet.param3 > 0) {
+            // relative angle
+            rover.mode_guided.set_desired_heading_delta_and_speed(packet.param1 * 100.0f, packet.param2);
+        } else {
+            // absolute angle
+            rover.mode_guided.set_desired_heading_and_speed(packet.param1 * 100.0f, packet.param2);
+        }
         return MAV_RESULT_ACCEPTED;
     }
 

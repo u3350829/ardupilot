@@ -29,33 +29,19 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Param/AP_Param.h>
-#include <StorageManager/StorageManager.h>
-#include <AP_GPS/AP_GPS.h>         // ArduPilot GPS library
-#include <AP_Baro/AP_Baro.h>        // ArduPilot barometer library
-#include <AP_Compass/AP_Compass.h>     // ArduPilot Mega Magnetometer Library
 #include <AP_Math/AP_Math.h>        // ArduPilot Mega Vector/Matrix math Library
-#include <AP_InertialSensor/AP_InertialSensor.h> // Inertial Sensor Library
-#include <AP_AccelCal/AP_AccelCal.h>                // interface and maths for accelerometer calibration
 #include <AP_AHRS/AP_AHRS.h>         // ArduPilot Mega DCM Library
 #include <Filter/Filter.h>                     // Filter library
 
-#include <AP_SerialManager/AP_SerialManager.h>   // Serial manager library
-#include <AP_Declination/AP_Declination.h> // ArduPilot Mega Declination Helper Library
 #include <AP_Logger/AP_Logger.h>
-#include <AC_PID/AC_PID.h>
 #include <AP_Scheduler/AP_Scheduler.h>       // main loop scheduler
 #include <AP_NavEKF2/AP_NavEKF2.h>
 #include <AP_NavEKF3/AP_NavEKF3.h>
 
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_Mission/AP_Mission.h>
-#include <AP_Terrain/AP_Terrain.h>
-#include <AP_Rally/AP_Rally.h>
 #include <AP_Stats/AP_Stats.h>                      // statistics library
 #include <AP_BattMonitor/AP_BattMonitor.h> // Battery monitor library
-#include <AP_Airspeed/AP_Airspeed.h>
-#include <AP_OpticalFlow/AP_OpticalFlow.h>
-#include <AP_Beacon/AP_Beacon.h>
 #include <AP_Common/AP_FWVersion.h>
 
 // Configuration
@@ -75,11 +61,16 @@
 #include <SITL/SITL.h>
 #endif
 
+#include "mode.h"
+
 class Tracker : public AP_Vehicle {
 public:
     friend class GCS_MAVLINK_Tracker;
     friend class GCS_Tracker;
     friend class Parameters;
+    friend class ModeAuto;
+    friend class ModeGuided;
+    friend class Mode;
 
     Tracker(void);
 
@@ -135,7 +126,17 @@ private:
                            nullptr};
     struct Location current_loc;
 
-    enum ControlMode control_mode  = INITIALISING;
+    Mode *mode_from_mode_num(enum Mode::Number num);
+
+    Mode *mode = &mode_initialising;
+
+    ModeAuto mode_auto;
+    ModeInitialising mode_initialising;
+    ModeManual mode_manual;
+    ModeGuided mode_guided;
+    ModeScan mode_scan;
+    ModeServoTest mode_servotest;
+    ModeStop mode_stop;
 
 #ifdef ENABLE_SCRIPTING
     AP_Scripting scripting;
@@ -153,7 +154,7 @@ private:
     } vehicle;
 
     // Navigation controller state
-    struct {
+    struct NavStatus {
         float bearing;                  // bearing to vehicle in centi-degrees
         float distance;                 // distance to vehicle in meters
         float pitch;                    // pitch to vehicle in degrees (positive means vehicle is above tracker, negative means below)
@@ -167,7 +168,7 @@ private:
         bool need_altitude_calibration  : 1;// true if tracker altitude has not been determined (true after startup)
         bool scan_reverse_pitch         : 1;// controls direction of pitch movement in SCAN mode
         bool scan_reverse_yaw           : 1;// controls direction of yaw movement in SCAN mode
-    } nav_status = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false, false, true, false, false};
+    } nav_status;
 
     // setup the var_info table
     AP_Param param_loader{var_info};
@@ -186,22 +187,6 @@ private:
     void one_second_loop();
     void ten_hz_logging_loop();
     void stats_update();
-
-    // control_auto.cpp
-    void update_auto(void);
-    void calc_angle_error(float pitch, float yaw, bool direction_reversed);
-    void convert_ef_to_bf(float pitch, float yaw, float& bf_pitch, float& bf_yaw);
-    bool convert_bf_to_ef(float pitch, float yaw, float& ef_pitch, float& ef_yaw);
-    bool get_ef_yaw_direction();
-
-    // control_manual.cpp
-    void update_manual(void);
-
-    // control_scan.cpp
-    void update_scan(void);
-
-    // control_servo_test.cpp
-    bool servo_test_set_servo(uint8_t servo_num, uint16_t pwm);
 
     // GCS_Mavlink.cpp
     void send_nav_controller_output(mavlink_channel_t chan);
@@ -246,8 +231,8 @@ private:
     void arm_servos();
     void disarm_servos();
     void prepare_servos();
-    void set_mode(enum ControlMode mode, ModeReason reason);
-    bool set_mode(const uint8_t new_mode, const ModeReason reason) override;
+    void set_mode(Mode &newmode, ModeReason reason);
+    bool set_mode(uint8_t new_mode, ModeReason reason) override;
     bool should_log(uint32_t mask);
     bool start_command_callback(const AP_Mission::Mission_Command& cmd) { return false; }
     void exit_mission_callback() { return; }

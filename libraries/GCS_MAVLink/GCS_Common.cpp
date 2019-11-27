@@ -24,7 +24,7 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
 #include <AP_Vehicle/AP_Vehicle.h>
-#include <AP_RangeFinder/RangeFinder_Backend.h>
+#include <AP_RangeFinder/AP_RangeFinder_Backend.h>
 #include <AP_Airspeed/AP_Airspeed.h>
 #include <AP_Camera/AP_Camera.h>
 #include <AP_Gripper/AP_Gripper.h>
@@ -38,6 +38,7 @@
 #include <AP_VisualOdom/AP_VisualOdom.h>
 #include <AP_OpticalFlow/OpticalFlow.h>
 #include <AP_Baro/AP_Baro.h>
+#include <AP_EFI/AP_EFI.h>
 
 #include <stdio.h>
 
@@ -783,6 +784,7 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
         { MAVLINK_MSG_ID_DEEPSTALL,             MSG_LANDING},
         { MAVLINK_MSG_ID_EXTENDED_SYS_STATE,    MSG_EXTENDED_SYS_STATE},
         { MAVLINK_MSG_ID_AUTOPILOT_VERSION,     MSG_AUTOPILOT_VERSION},
+        { MAVLINK_MSG_ID_EFI_STATUS,            MSG_EFI_STATUS},
             };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -1293,6 +1295,9 @@ void GCS_MAVLINK::packetReceived(const mavlink_status_t &status,
     if (!routing.check_and_forward(chan, msg)) {
         // the routing code has indicated we should not handle this packet locally
         return;
+    }
+    if (msg.msgid == MAVLINK_MSG_ID_GLOBAL_POSITION_INT) {
+        handle_mount_message(msg);
     }
     if (!accept_packet(status, msg)) {
         // e.g. enforce-sysid says we shouldn't look at this packet
@@ -1966,6 +1971,7 @@ void GCS::setup_uarts()
     }
 
 #if !HAL_MINIMIZE_FEATURES
+    ltm_telemetry.init();
     devo_telemetry.init();
 #endif
 }
@@ -2220,6 +2226,22 @@ void GCS_MAVLINK::send_gps_global_origin() const
         AP_HAL::micros64());
 }
 
+MAV_STATE GCS_MAVLINK::system_status() const
+{
+    MAV_STATE _system_status = vehicle_system_status();
+    if (_system_status < MAV_STATE_CRITICAL) {
+        // note that POWEROFF and FLIGHT_TERMINATION are both >
+        // CRITICAL, so we will not overwrite POWEROFF and
+        // FLIGHT_TERMINATION even if we have internal errors.  If new
+        // enum entries are added then this may also not overwrite
+        // those.
+        if (AP::internalerror().errors()) {
+            _system_status = MAV_STATE_CRITICAL;
+        }
+    }
+    return _system_status;
+}
+
 /*
   Send MAVLink heartbeat
  */
@@ -2326,7 +2348,7 @@ bool GCS_MAVLINK::get_ap_message_interval(ap_message id, uint16_t &interval_ms) 
 
 MAV_RESULT GCS_MAVLINK::handle_command_get_message_interval(const mavlink_command_long_t &packet)
 {
-    if (comm_get_txspace(chan) < PAYLOAD_SIZE(chan, MESSAGE_INTERVAL) + PAYLOAD_SIZE(chan, COMMAND_ACK)) {
+    if (txspace() < PAYLOAD_SIZE(chan, MESSAGE_INTERVAL) + PAYLOAD_SIZE(chan, COMMAND_ACK)) {
         return MAV_RESULT_TEMPORARILY_REJECTED;
     }
 
@@ -3628,6 +3650,9 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
         break;
     }
 
+    case MAV_CMD_DO_SET_ROI_SYSID:
+        return handle_command_do_set_roi_sysid(packet);
+
     case MAV_CMD_DO_SET_ROI_LOCATION:
     case MAV_CMD_DO_SET_ROI:
         result = handle_command_do_set_roi(packet);
@@ -3835,6 +3860,27 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_do_set_home(const mavlink_command_int
     return MAV_RESULT_ACCEPTED;
 }
 
+
+MAV_RESULT GCS_MAVLINK::handle_command_do_set_roi_sysid(const uint8_t sysid)
+{
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return MAV_RESULT_UNSUPPORTED;
+    }
+    mount->set_target_sysid(sysid);
+    return MAV_RESULT_ACCEPTED;
+}
+
+MAV_RESULT GCS_MAVLINK::handle_command_do_set_roi_sysid(const mavlink_command_int_t &packet)
+{
+    return handle_command_do_set_roi_sysid((uint8_t)packet.param1);
+}
+
+MAV_RESULT GCS_MAVLINK::handle_command_do_set_roi_sysid(const mavlink_command_long_t &packet)
+{
+    return handle_command_do_set_roi_sysid((uint8_t)packet.param1);
+}
+
 MAV_RESULT GCS_MAVLINK::handle_command_do_set_roi(const mavlink_command_int_t &packet)
 {
     // be aware that this method is called for both MAV_CMD_DO_SET_ROI
@@ -3887,6 +3933,8 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_DO_SET_ROI:
     case MAV_CMD_DO_SET_ROI_LOCATION:
         return handle_command_do_set_roi(packet);
+    case MAV_CMD_DO_SET_ROI_SYSID:
+        return handle_command_do_set_roi_sysid(packet);
     case MAV_CMD_DO_SET_HOME:
         return handle_command_int_do_set_home(packet);
     default:
@@ -4443,6 +4491,17 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
                 default:
                     break;
             }
+        }
+#endif
+        break;
+    }
+
+    case MSG_EFI_STATUS: {
+#if EFI_ENABLED
+        CHECK_PAYLOAD_SIZE(EFI_STATUS);
+        AP_EFI *efi = AP::EFI();
+        if (efi) {
+            efi->send_mavlink_status(chan);
         }
 #endif
         break;
